@@ -1,0 +1,29 @@
+[project]
+name = "spine-artist"
+version = "0.1.0-alpha"
+description = "Turn character images into Spine 4.2 portraits with expressions and blink"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.0",
+    "pillow>=10.4.0",
+]
+
+[project.scripts]
+spine-artist = "spine_artist.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/spine_artist"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
