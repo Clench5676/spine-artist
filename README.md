@@ -8,6 +8,7 @@ bundles; the built-in target is Blue Archive (`*_spr`).
 ## What it does
 
 - Finds the target portrait by a character's name in any language the game has, and extracts its files.
+- Mattes a `full.png` drawn on a background with a character segmentation model.
 - Derives the layers from the images: the body, one feature patch per expression (eyes, brows, mouth and blush,
   one shape for all) and the eye-close patch; the rest of the face stays the body's.
 - Builds hull meshes, a polygon-packed atlas and a Spine 4.2 skeleton with the target's animation names
@@ -26,6 +27,8 @@ bundles; the built-in target is Blue Archive (`*_spr`).
   (`SPINE_ARTIST_CONVERTER`).
 - Optional: [waifu2x-ncnn-vulkan](https://github.com/nihui/waifu2x-ncnn-vulkan) (`SPINE_ARTIST_WAIFU2X`, with its
   `models-*` folders beside it).
+- Optional, for a `full.png` on a background: the `matte` extra (`uv sync --extra matte`, onnxruntime) and a character
+  segmentation model, [anime-seg](https://huggingface.co/skytnt/anime-seg) `isnetis.onnx` (`SPINE_ARTIST_MATTE`).
 - For `target` and `mod`: the `ba_modding_toolkit` package importable, and the game folder.
 
 ## Usage

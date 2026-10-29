@@ -677,3 +677,82 @@ def test_mod_takes_the_bundles_target_recorded(tmp_path):
     with pytest.raises(TargetError, match='--bundles'):
         target_bundles(out)
 
+
+class _Segmenter:
+    """Stands in for the matte model: everything not white and not the black padding is the character."""
+    def run(self, outputs, feeds):
+        x = feeds['img'][0]
+        return [((x.min(0) < .97) & (x.max(0) > 0)).astype(np.float32)[None, None]]
+
+
+def test_matte_maps_the_mask_back_onto_the_picture():
+    from spine_artist.matte import mask
+    rgb = np.ones((300, 120, 3), np.float32)
+    rgb[40:260, 30:90] = (.2, .3, .6)
+    m = mask(_Segmenter(), rgb, 256, 'img')
+    assert m.shape == (300, 120)
+    assert m[50:250, 40:80].min() > .99 and m[:30].max() < .01 and m[:, :20].max() < .01
+    from spine_artist.matte import character_mask
+    big = np.ones((700, 300, 3), np.float32)
+    big[100:600, 80:220] = (.2, .3, .6)
+    c = character_mask(_Segmenter(), big, 256, 'img')                      # the edge from tiles at full resolution
+    assert c.shape == (700, 300) and c[110:590, 90:210].min() > .99 and c[:90].max() < .01
+    assert np.abs(c[:, 79:81].mean() - .5) < .3 and c[:, :70].max() < .01
+
+
+def make_images_on_white(folder):
+    """make_images drawn on a white background: no transparency anywhere."""
+    make_images(folder)
+    for f in [folder / 'full.png', folder / 'eyeclose.png', *(folder / 'expressions').glob('*.png')]:
+        im = Image.open(f).convert('RGBA')
+        bg = Image.new('RGBA', im.size, (255, 255, 255, 255))
+        bg.alpha_composite(im)
+        bg.convert('RGB').save(f)
+    return folder
+
+
+def test_images_on_a_background_are_matted(tmp_path, monkeypatch):
+    from spine_artist import matte
+    folder = make_images_on_white(tmp_path / 'img')
+    with pytest.raises(BuildError, match='SPINE_ARTIST_MATTE'):
+        build(folder, render=False)
+    model = tmp_path / 'isnetis.onnx'
+    model.write_bytes(b'model')
+    monkeypatch.setenv('SPINE_ARTIST_MATTE', str(model))
+    monkeypatch.setattr(matte, '_session', lambda path: _Segmenter())
+    report = build(folder, render=False)
+    assert report['matte']['model'] == 'isnet-anime' and report['matte']['proposed']
+    layers = folder / 'build' / 'derived' / 'layers'
+    body = np.asarray(Image.open(layers / 'body.png'))
+    assert body[5, 5, 3] == 0 and body[400, 200, 3] == 255                 # background gone, the body kept
+    derived = json.loads((folder / 'build' / 'derived' / 'derive.json').read_text())
+    x0, y0, x1, y1 = derived['face_box']                                   # found without a face box
+    assert x0 <= 168 and x1 >= 232 and y0 <= 128 and y1 >= 198 and y1 <= 240
+    patch = np.asarray(Image.open(layers / 'face_02.png'))
+    assert patch[..., 3][body[..., 3] == 0].max() == 0                     # the edits take full.png's alpha
+    calls = []
+    monkeypatch.setattr(matte, '_session', lambda path: calls.append(path) or _Segmenter())
+    build(folder, render=False)
+    assert not calls                                                       # cached by input and model
+    proj.save(folder, {'format': proj.FORMAT, 'name': 'img', 'matte': 'none'})
+    with pytest.raises(BuildError, match='matte is "none"'):
+        build(folder, render=False)
+
+
+def test_matte_edge_loses_the_background_rim():
+    """A soft mask keeps a rim of the white background around a dark figure; refine takes it off."""
+    from spine_artist.matte import refine
+    h = w = 80
+    yy, xx = np.mgrid[0:h, 0:w]
+    r = np.hypot(yy - 40, xx - 40)
+    truth = np.clip(25.5 - r, 0, 1).astype(np.float32)                    # a disc with a one-pixel soft edge
+    figure = np.array((.2, .1, .4), np.float32)
+    rgb = figure * truth[..., None] + 1. * (1 - truth[..., None])          # drawn on white
+    soft = np.clip((28 - r) / 5, 0, 1).astype(np.float32)                  # the model's mask: 3 px too wide, soft
+    def rim(colour, alpha):
+        over_black = colour * alpha[..., None]
+        return float(over_black[(r > 26) & (r < 29)].max())               # light left outside the figure
+    colour, alpha = refine(rgb, soft)
+    assert rim(rgb, soft) > .3 and rim(colour, alpha) < .05
+    inside = r < 22                                                       # where the mask is sure
+    assert np.allclose(colour[inside], rgb[inside]) and np.allclose(alpha[inside], 1)

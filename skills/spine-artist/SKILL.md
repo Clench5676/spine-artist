@@ -14,13 +14,18 @@ Put them in a project folder:
 
 | File | What it holds |
 | --- | --- |
-| `full.png` | the whole character, transparent background, the default expression |
+| `full.png` | the whole character, the default expression; a transparent background is best |
 | `expressions/01.png` … `NN.png` | an **edit of full.png** that changes only the face (eyes, brows, mouth); nothing else may move |
 | `eyeclose.png` | the same edit with both eyes closed |
 | `halo.png` (optional) | a part that floats on its own bone (a halo) alone; without it, a build with a `target` carries the target's own |
 | `blank.png` (optional) | full.png with the face left blank (skin only) |
 
 A floating part never goes into `full.png`: it moves on its own bone. Leave room for it.
+
+Most image APIs return a transparent background on request. A `full.png` on a background is matted with a character
+segmentation model (`SPINE_ARTIST_MATTE`: [anime-seg](https://huggingface.co/skytnt/anime-seg) `isnetis.onnx`;
+onnxruntime from the `matte` extra), a few seconds on a CPU; the expressions take its alpha. Check the edges in
+`pose-base.png` (see Limits); a transparent background avoids matting.
 
 Edits, not new drawings: the converter compares each expression with `full.png`, finds the face where large areas
 change (eyes, open mouths), and cuts one feature patch shape that every expression and the eye-close share, as
@@ -53,6 +58,7 @@ bundles) and sets `name` and `target` in `project.json`. Without a target, skip 
 ```bash
 export SPINE_ARTIST_CONVERTER=<SpineSkeletonDataConverter binary>
 export SPINE_ARTIST_WAIFU2X=<waifu2x-ncnn-vulkan binary>  # optional
+export SPINE_ARTIST_MATTE=<isnetis.onnx>                   # optional: full.png on a background
 uv run spine-artist license --confirm                     # once: you hold a Spine license
 uv run spine-artist build <project>
 ```
@@ -65,7 +71,7 @@ Look at `build/renders/`:
 - `overlay-mesh-bones.png`: meshes and pivots.
 - `report.json`: `geometry` (silhouette IoU and shift against the input, halo left out), `round_trip`,
   `pack.density`, `resolution` (texels per world unit against the target's portrait; below 0.8 it shows softer),
-  `upscale`, `official` (what was carried), `instruments.expression_change` (pixels that change between expressions,
+  `upscale`, `matte` (model, figure share), `official` (what was carried), `instruments.expression_change` (pixels that change between expressions,
   and those outside the face patch: 0), warnings.
 
 Decisions go in an optional `project.json` (`format: spine-artist/1`); everything missing is proposed from the
@@ -92,6 +98,8 @@ target's conventions and the resolved decisions are recorded in `build/manifest.
 
   `derive.json` `features` gives the patch size, each edit's `face_shift`, `seam_ghost_p99` (how much the feather
   mixes two different strokes) and `missed_strong_px` (strong changes left outside the patch: 0).
+- `matte`: `{"model": "isnet-anime"}`, proposed when `full.png` has no transparent background, or `"none"` (then
+  such a `full.png` stops the build).
 - `upscale`: `{"scale": 1|2|4, "noise": -1..3, "model": "cunet"}`. The images are enlarged with waifu2x
   (`SPINE_ARTIST_WAIFU2X`, the `models-*` folders beside it) before cutting; 2 is proposed when the expected
   resolution is below 0.8 (`report.json` `upscale.estimate`). It adds pixels, not detail. After upscaling, `frame`,
@@ -133,5 +141,7 @@ drawing; a manifest per build with every input hash.
 - An image model's single picture (about 1.5 MP) is below the resolution of a full-figure game portrait (941x1672:
   0.69 of Blue Archive's); waifu2x restores the texel count, not the detail (at 2x with one cut: 1.07).
 - Target halo slots drawn in front of the target's other slots go in front of the whole new art.
+- Matting: gaps under about 3 px (a stray strand and the head) stay filled, white parts on a white background lose
+  about 1 px of edge, and a background close to the character's colours can stay in pockets.
 - No hair sway, physics or weighted meshes; face patches move with the body.
 - A build takes about 2 min on a 1882x3344 canvas, mostly full-size renders.

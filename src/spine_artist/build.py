@@ -21,7 +21,7 @@ from .atlas import PackParams, atlas_text, pack
 from .mesh import MeshParams, build_mesh, coverage
 from .skeleton import attachment_name, build_skeleton
 from . import instruments as ins
-from . import upscale
+from . import matte, upscale
 
 ENGINE = 'spine-artist 0.1'
 CONVERTER_ENV = 'SPINE_ARTIST_CONVERTER'
@@ -81,6 +81,31 @@ def _upscale(raw: dict, found: dict[str, Path], ref, out: Path, warnings: list[s
     return setting, upscaled
 
 
+def _matte(raw: dict, found: dict[str, Path], out: Path) -> tuple[dict[str, Path], dict | None]:
+    """A matted full.png when it has no transparent background (the sources with it, and the report)."""
+    with Image.open(found['full']) as im:
+        opaque = matte.needs_matte(np.asarray(im.convert('RGBA'), dtype=np.float32) / 255)
+    if not opaque:
+        return found, None
+    setting = raw.get('matte')
+    if setting == 'none':
+        raise BuildError(['full.png has no transparent background and matte is "none"'])
+    model = matte.model_path(raw)
+    if model is None or not model.is_file():
+        raise BuildError([f'full.png has no transparent background: give a transparent full.png, or set '
+                          f'{matte.MODEL_ENV} to a character matte model (isnet-anime: isnetis.onnx)'])
+    setting = {'model': 'isnet-anime', **(setting or {})}
+    try:
+        matted = matte.matte_image(found['full'], out / 'matted', setting, model)
+    except matte.MatteError as e:
+        raise BuildError([str(e)])
+    with Image.open(matted) as im:
+        alpha = np.asarray(im.getchannel('A'), dtype=np.float32) / 255
+    report = {**setting, 'proposed': raw.get('matte') is None, 'model_sha256': _sha256(model),
+              'figure_share': round(float((alpha > .5).mean()), 4), 'output': _sha256(matted)}
+    return {**found, 'full': matted}, report
+
+
 def build(folder: Path, out: Path | None = None, *, render: bool = True, idle_frames: int = 8,
           blink_frames: int = 3) -> dict:
     folder = Path(folder)
@@ -88,6 +113,7 @@ def build(folder: Path, out: Path | None = None, *, render: bool = True, idle_fr
     started = time.time()
     raw = proj.load(folder)
     image_hashes = None
+    matte_report = None
     warnings: list[str] = []
     upscaled_report = None
     if not raw.get('layers') and (folder / 'full.png').is_file():
@@ -98,13 +124,14 @@ def build(folder: Path, out: Path | None = None, *, render: bool = True, idle_fr
         if raw.get('target'):
             from .reference import load_reference
             ref = load_reference(proj.resolve(folder, raw['target']['reference']), raw['target']['core'])
-        errors = upscale.validate(raw.get('upscale'))
+        errors = upscale.validate(raw.get('upscale')) + matte.validate(raw.get('matte'))
         if errors:
             raise BuildError(errors)
+        found, matte_report = _matte(raw, found, out)
         setting, upscaled = _upscale(raw, found, ref, out, warnings)
         upscaled_report = setting
         derived = derive(folder, out / 'derived', raw.get('derive_params'), upscaled=upscaled,
-                         scale=setting['scale'], face_share=ref.face_share if ref else None)
+                         scale=setting['scale'], face_share=ref.face_share if ref else None, full=found['full'])
         warnings += derived['derive'].get('warnings', [])
         for l in derived['layers']:
             l['file'] = str((out / 'derived' / l['file']).resolve())
@@ -241,7 +268,8 @@ def build(folder: Path, out: Path | None = None, *, render: bool = True, idle_fr
     else:
         warnings.append(f'binary .skel not written: no converter configured ({CONVERTER_ENV})')
     report = {'engine': ENGINE, 'name': name, 'warnings': warnings, 'meshes': mesh_report, 'pack': packed.stats,
-              'resolution': resolution, 'upscale': upscaled_report, 'official': carried.report if carried else None,
+              'resolution': resolution, 'upscale': upscaled_report, 'matte': matte_report,
+              'official': carried.report if carried else None,
               'atlas': {lid: {'page': pl.page, 'x': pl.x, 'y': pl.y, 'width': pl.width, 'height': pl.height,
                               'box': list(pl.box)} for lid, pl in packed.placements.items()}}
     data['_density'] = packed.density
@@ -259,6 +287,7 @@ def build(folder: Path, out: Path | None = None, *, render: bool = True, idle_fr
         'controls': {k: v for k, v in data.items() if not k.startswith('_')}, 'outputs': outputs,
         'meshes': {lid: {k: v for k, v in r.items() if k != 'params'} for lid, r in mesh_report.items()},
         'atlas': report['atlas'], 'pack': packed.stats, 'resolution': resolution, 'upscale': upscaled_report,
+        'matte': matte_report,
         'warnings': warnings,
     }
     if data.get('target'):

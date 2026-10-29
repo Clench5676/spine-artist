@@ -362,12 +362,23 @@ def _share(box, figure_height: float) -> float:
     return float(((box[2] - box[0]) * (box[3] - box[1])) ** .5 / max(1., figure_height))
 
 
+def _as_edit(img: np.ndarray, full: np.ndarray) -> np.ndarray:
+    """An edit drawn on a background takes full.png's alpha: it is the same picture."""
+    from .matte import needs_matte
+    if not needs_matte(img) or img.shape != full.shape:
+        return img
+    img = img.copy()
+    img[..., 3] = np.minimum(img[..., 3], full[..., 3])
+    return img
+
+
 def derive(folder: Path, out: Path, params: dict | None = None, *, upscaled: dict[str, Path] | None = None,
-           scale: int = 1, face_share: float | None = None) -> dict:
+           scale: int = 1, face_share: float | None = None, full: Path | None = None) -> dict:
     """Write layers and a layer project into `out` from the images in `folder`; returns the layer project.
 
     upscaled: the sources' upscaled copies (`sources` names), `scale` times their size; the layers come from them.
     face_share: the official face's size against the official figure; a found face far from it stops here.
+    full: full.png's matted copy, when full.png has no transparent background (build.py).
     """
     folder, out = Path(folder), Path(out)
     mode = (params or {}).get('patch', 'features')
@@ -376,13 +387,14 @@ def derive(folder: Path, out: Path, params: dict | None = None, *, upscaled: dic
     p = {'patch': mode, 'threshold': 24 / 255, 'speck': 2, 'drift_p99': 18 / 255,
          'reach': 2.5, 'min_cells': 2, 'roi': .5, 'face_box': None, **PATCH_DEFAULTS[mode],
          **(params or {})}
-    full_path = folder / 'full.png'
+    full_path = Path(full) if full else folder / 'full.png'
     if not full_path.is_file():
         raise DeriveError('full.png is required')
     full = _rgba(full_path)
     h, w = full.shape[:2]
-    if full[..., 3].min() >= 1:
-        raise DeriveError('full.png needs a transparent background')
+    from .matte import needs_matte
+    if needs_matte(full):
+        raise DeriveError('full.png needs a transparent background (or a matte model: SPINE_ARTIST_MATTE)')
     locate_sheet(full, out / 'locate.png')
     found = sources(folder)
     exprs = {k: v for k, v in found.items() if EXPRESSION.match(k) and k != '99'}
@@ -398,6 +410,7 @@ def derive(folder: Path, out: Path, params: dict | None = None, *, upscaled: dic
         if img.shape[:2] != (h, w):
             img = np.asarray(Image.fromarray(np.uint8(img * 255), 'RGBA').resize((w, h), Image.Resampling.LANCZOS),
                              dtype=np.float32) / 255
+        img = _as_edit(img, full)
         d0 = np.abs(_premul(img) - pf).max(-1)
         if np.percentile(d0, 99) < p['drift_p99']:
             reg = {'scale': 1., 'dx': 0., 'dy': 0., 'identity': True}     # already aligned: keep pixels untouched
@@ -450,7 +463,7 @@ def derive(folder: Path, out: Path, params: dict | None = None, *, upscaled: dic
     shifts = {}
     if p['patch'] == 'features':
         # the patch shows on the body: compare the edits with it (blank.png, else full.png)
-        base = _premul(_rgba(folder / 'blank.png')) if (folder / 'blank.png').is_file() else pf
+        base = _premul(_as_edit(_rgba(folder / 'blank.png'), full)) if (folder / 'blank.png').is_file() else pf
         if base.shape != pf.shape:
             raise DeriveError('blank.png must have the size of full.png')
         for key in aligned:
@@ -480,10 +493,13 @@ def derive(folder: Path, out: Path, params: dict | None = None, *, upscaled: dic
         # cut the layers from the upscaled copies: same outline and registration, scaled; their own pixels
         size = (w * scale, h * scale)
         alpha = np.asarray(Image.fromarray(alpha, 'F').resize(size, Image.Resampling.BILINEAR), dtype=np.float32)
+        full_up = _rgba(upscaled['full'])
         def pixels(key):
             img = _rgba(upscaled[key])
             if img.shape[:2] != (size[1], size[0]):
                 raise DeriveError(f'upscaled {key} is {img.shape[1]}x{img.shape[0]}, expected {size[0]}x{size[1]}')
+            if key not in ('full', 'halo'):
+                img = _as_edit(img, full_up)
             reg = report['registration'].get(key)
             if reg and not reg.get('identity'):
                 img = _resample(img, reg['scale'], (reg['dx'] * scale, reg['dy'] * scale), size)
@@ -495,7 +511,7 @@ def derive(folder: Path, out: Path, params: dict | None = None, *, upscaled: dic
         report['canvas_scale'] = scale
     else:
         def pixels(key):
-            return _rgba(found[key])
+            return _as_edit(_rgba(found[key]), full) if key == 'blank' else _rgba(found[key])
     layers = []
     if (folder / 'halo.png').is_file():
         layers.append({'id': 'halo', 'file': save('halo', pixels('halo')), 'role': 'halo'})

@@ -10,6 +10,9 @@ dependencies = [
     "pillow>=10.4.0",
 ]
 
+[project.optional-dependencies]
+matte = ["onnxruntime>=1.18"]
+
 [project.scripts]
 spine-artist = "spine_artist.__main__:main"
 
