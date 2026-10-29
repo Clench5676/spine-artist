@@ -20,6 +20,15 @@ class ModError(RuntimeError):
     pass
 
 
+def target_bundles(build_dir: Path) -> list[Path]:
+    """The target core's bundles that `spine-artist target` recorded for the build's reference."""
+    from .target import TargetError, bundles_of
+    manifest = json.loads((Path(build_dir) / 'manifest.json').read_text(encoding='utf-8'))
+    if not manifest.get('reference'):
+        raise TargetError('the build has no target: pass --bundles')
+    return bundles_of(Path(manifest['reference']))
+
+
 def pack_mod(build_dir: Path, official_bundles: list[Path], out_dir: Path) -> dict:
     try:
         from ba_modding_toolkit import atlas_remap as remap, core

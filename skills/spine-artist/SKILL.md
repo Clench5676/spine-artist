@@ -36,7 +36,19 @@ build). Without a box the converter checks the found changes against the charact
 face against its figure, factor 2) and stops with that request; `derive.json` `face_share` gives both numbers. A
 seam or doubled hair at the patch edge is an image problem: ask for the edit again.
 
-## 2. Build, look, adjust
+## 2. Pick the target (Blue Archive)
+
+```bash
+uv run spine-artist target <project> "<character, a skin included, in any language, or a core>" --game <game folder>
+```
+
+Ask the user for the game folder, or for leave to search the usual Steam and Wine places (`--search` instead of
+`--game`; `--region japan` for the Japanese release). Names match in every language the game has ("Utaha", "歌原",
+"Hoshino (Swimsuit)"). Several matches are listed with their names (exit 2): pick one with the user and run again
+with its core. One match writes `reference/<core>/` (skeleton, atlas, pages and `target.json` with the core's
+bundles) and sets `name` and `target` in `project.json`. Without a target, skip this step.
+
+## 3. Build, look, adjust
 
 ```bash
 export SPINE_ARTIST_CONVERTER=<SpineSkeletonDataConverter binary>
@@ -90,20 +102,21 @@ target's conventions and the resolved decisions are recorded in `build/manifest.
   shares; present: used as given (`{}`: no cuts). Move a cut off a detail that must not be split, if
   `pose-base.png` shows a line there.
 
-## 3. Pack (with a target)
+## 4. Pack (with a target)
 
 ```bash
-uv run spine-artist mod <project>/build --bundles <the core's game bundles> --out <project>/mod
+uv run spine-artist mod <project>/build --out <project>/mod
 ```
 
-Needs the `ba_modding_toolkit` package on the path. The mod holds only the target's bundles with the skeleton,
+The bundles are those `target` recorded (or `--bundles <the core's game bundles>`). `target` and `mod` need the
+`ba_modding_toolkit` package on the path. The mod holds only the target's bundles with the skeleton,
 atlas and page replaced (RGBA32, LZ4, CRC fixed).
 
 ## Targets
 
 The built-in target is Blue Archive portraits (`*_spr`): the animation names `Idle_01`, `00`..`NN`, `99` and
-`Eye_Close_01`, their loop and blink timings, the idle proposals above, scale 0.01, the halo carried from the
-reference and the bundle step. Without a `target`, a build is a plain Spine 4.2 skeleton, atlas and page with the
+`Eye_Close_01`, their loop and blink timings, the idle proposals above, scale 0.01, the reference found and
+extracted by `target`, the halo carried from it and the bundle step. Without a `target`, a build is a plain Spine 4.2 skeleton, atlas and page with the
 same animations.
 
 ## What the converter guarantees (rails)

@@ -7,6 +7,7 @@ bundles; the built-in target is Blue Archive (`*_spr`).
 
 ## What it does
 
+- Finds the target portrait by a character's name in any language the game has, and extracts its files.
 - Derives the layers from the images: the body, one feature patch per expression (eyes, brows, mouth and blush,
   one shape for all) and the eye-close patch; the rest of the face stays the body's.
 - Builds hull meshes, a polygon-packed atlas and a Spine 4.2 skeleton with the target's animation names
@@ -25,15 +26,16 @@ bundles; the built-in target is Blue Archive (`*_spr`).
   (`SPINE_ARTIST_CONVERTER`).
 - Optional: [waifu2x-ncnn-vulkan](https://github.com/nihui/waifu2x-ncnn-vulkan) (`SPINE_ARTIST_WAIFU2X`, with its
   `models-*` folders beside it).
-- For `mod`: the `ba_modding_toolkit` package importable, and the target core's game bundles.
+- For `target` and `mod`: the `ba_modding_toolkit` package importable, and the game folder.
 
 ## Usage
 
 ```bash
 uv sync
 uv run spine-artist license --confirm
+uv run spine-artist target <project> "<character or core>" --game <game folder>     # with a target
 uv run spine-artist build <project>
-uv run spine-artist mod <project>/build --bundles <the core's game bundles> --out <project>/mod
+uv run spine-artist mod <project>/build --out <project>/mod
 ```
 
 A project folder holds `full.png`, `expressions/01.png` … `NN.png`, `eyeclose.png` and an optional

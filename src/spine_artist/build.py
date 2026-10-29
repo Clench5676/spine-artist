@@ -261,6 +261,8 @@ def build(folder: Path, out: Path | None = None, *, render: bool = True, idle_fr
         'atlas': report['atlas'], 'pack': packed.stats, 'resolution': resolution, 'upscale': upscaled_report,
         'warnings': warnings,
     }
+    if data.get('target'):
+        manifest['reference'] = str(proj.resolve(folder, data['target']['reference']).resolve())
     if carried:
         reference = proj.resolve(folder, data['target']['reference'])
         manifest['official'] = {**carried.report, 'files': {

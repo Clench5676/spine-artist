@@ -582,3 +582,98 @@ def test_cuts_are_proposed_when_a_layer_exceeds_the_page(tmp_path):
             rows = manifest['controls']['cuts']['body']
             assert len(rows) == 1 and 200 < rows[0] < 400 and rows[0] % 2 == 0
     assert density['cut'] > density['whole'] and density['cut'] >= .99
+
+
+class _Variant:
+    def __init__(self, key, spr, names, aliases=()):
+        self.key, self.spr, self.aliases = key, spr, list(aliases)
+        self.names = {lang: {'full': n, 'short': n} for lang, n in names.items()}
+
+
+class _Family:
+    def __init__(self, *variants):
+        self.variants = list(variants)
+
+
+class _Catalog:
+    def families(self):
+        return [_Family(_Variant('utaha', 'utaha_spr', {'en': 'Utaha', 'zh-CN': '歌原', 'ja': 'ウタハ'}),
+                        _Variant('utahaturret', 'utahaturret_spr', {'en': 'Utaha (Thundergun)', 'zh-CN': '歌原（雷酱）'})),
+                _Family(_Variant('ch0187', 'CH0187_spr', {'en': 'Someone (New)'}))]
+
+
+class _Game:
+    """The game reader's two queries: installed portrait cores and a core's files (the game's own spelling)."""
+    spelled = {'utaha_spr': 'utaha_spr', 'utahaturret_spr': 'utahaturret_spr', 'ch0187_spr': 'CH0187_spr'}
+
+    def __init__(self, folder):
+        self.folder = folder
+
+    def spine_cores(self, kind):
+        assert kind == 'spr'
+        return {core: [self.folder / f'assets-{core}-{i}.bundle' for i in range(2)] for core in self.spelled}
+
+    def spine_files(self, kind, core):
+        name = self.spelled[core.lower()]
+        return {f'{name}.skel': b'skel', f'{name}.atlas': f'{name}.png\n'.encode(), f'{name}.png': b'png'}
+
+
+def _upstream(game_dir, found=True):
+    return {'find_game_dirs': lambda region: [game_dir] if found else [], 'search_dirs': lambda d: [d],
+            'game': lambda dirs: _Game(dirs[0]), 'catalog': lambda game, region: _Catalog()}
+
+
+def test_target_needs_the_game_folder_or_leave_to_search(tmp_path):
+    from spine_artist.target import TargetError, resolve
+    game = tmp_path / 'game'; game.mkdir()
+    with pytest.raises(TargetError, match='--game DIR.*--search'):
+        resolve(tmp_path / 'p', 'Utaha', up=_upstream(game))
+    with pytest.raises(TargetError, match='no global install'):
+        resolve(tmp_path / 'p', 'Utaha', search=True, up=_upstream(game, found=False))
+    with pytest.raises(TargetError, match='no game folder'):
+        resolve(tmp_path / 'p', 'Utaha', game=tmp_path / 'missing', up=_upstream(game))
+
+
+def test_target_finds_a_character_by_any_name_and_sets_the_project(tmp_path):
+    from spine_artist.target import resolve, bundles_of
+    game = tmp_path / 'game'; game.mkdir()
+    folder = tmp_path / 'p'; folder.mkdir()
+    proj.save(folder, {'format': proj.FORMAT, 'derive_params': {'face_box': [1, 2, 3, 4]}, 'target': {'halo': 'none'}})
+    result = resolve(folder, '歌原', search=True, up=_upstream(game))
+    assert result['core'] == 'utaha_spr' and result['bundles'] == 2
+    ref = folder / 'reference' / 'utaha_spr'
+    assert {p.name for p in ref.iterdir()} == {'utaha_spr.skel', 'utaha_spr.atlas', 'utaha_spr.png', 'target.json'}
+    data = json.loads((folder / 'project.json').read_text())
+    assert data['name'] == 'utaha_spr' and data['derive_params'] == {'face_box': [1, 2, 3, 4]}
+    assert data['target'] == {'halo': 'none', 'core': 'utaha_spr', 'reference': 'reference/utaha_spr', 'fit': 'face'}
+    assert bundles_of(ref) == [game / f'assets-utaha_spr-{i}.bundle' for i in range(2)]
+    assert resolve(folder, 'utaha (thundergun)', game=game, up=_upstream(game))['core'] == 'utahaturret_spr'
+    assert resolve(folder, 'ch0187', game=game, up=_upstream(game))['core'] == 'CH0187_spr'     # the game's spelling
+    assert json.loads((folder / 'project.json').read_text())['name'] == 'CH0187_spr'
+
+
+def test_target_lists_the_candidates_when_several_match(tmp_path):
+    from spine_artist.target import Ambiguous, TargetError, resolve
+    game = tmp_path / 'game'; game.mkdir()
+    with pytest.raises(Ambiguous) as e:
+        resolve(tmp_path / 'p', 'uta', game=game, up=_upstream(game))
+    assert [c['core'] for c in e.value.candidates] == ['utaha_spr', 'utahaturret_spr']
+    assert e.value.candidates[1]['names']['zh-CN'] == '歌原（雷酱）'
+    with pytest.raises(TargetError, match='no portrait matches'):
+        resolve(tmp_path / 'p', 'nobody', game=game, up=_upstream(game))
+    assert not (tmp_path / 'p' / 'project.json').exists()
+
+
+def test_mod_takes_the_bundles_target_recorded(tmp_path):
+    from spine_artist.mod import target_bundles
+    from spine_artist.target import TargetError, resolve
+    game = tmp_path / 'game'; game.mkdir()
+    folder = tmp_path / 'p'; folder.mkdir()
+    resolve(folder, 'Utaha', game=game, up=_upstream(game))
+    out = tmp_path / 'build'; out.mkdir()
+    (out / 'manifest.json').write_text(json.dumps({'reference': str(folder / 'reference' / 'utaha_spr')}))
+    assert target_bundles(out) == [game / f'assets-utaha_spr-{i}.bundle' for i in range(2)]
+    (out / 'manifest.json').write_text(json.dumps({}))
+    with pytest.raises(TargetError, match='--bundles'):
+        target_bundles(out)
+
