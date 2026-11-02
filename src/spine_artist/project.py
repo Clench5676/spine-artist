@@ -48,7 +48,10 @@ def load(folder: Path) -> dict:
         if (folder / 'full.png').is_file():
             return {'format': FORMAT, 'name': folder.name}     # images only: every decision proposed
         raise ProjectError(f'missing {path}')
-    data = json.loads(path.read_text(encoding='utf-8'))
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'))
+    except json.JSONDecodeError as e:
+        raise ProjectError(f'{path}: {e}') from e
     if data.get('format') != FORMAT:
         raise ProjectError(f'unsupported project format {data.get("format")!r}')
     return data
@@ -94,7 +97,8 @@ def propose(folder: Path, data: dict) -> dict:
     out.setdefault('name', folder.name)
     layers = out.get('layers') or []
     if not layers:
-        raise ProjectError('project has no layers')
+        raise ProjectError('project has no layers: a project of images gets its decisions at the build '
+                           '(`controls` in build/manifest.json)')
     images = {l['id']: read_layer(folder, l) for l in layers}
     sizes = {im.size for im in images.values()}
     if len(sizes) != 1:

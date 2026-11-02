@@ -1,7 +1,8 @@
 """One build: controls and layers in, Spine skeleton, atlas, pages, instruments and manifest out.
 
 The build never changes the driver's project.json. Missing decisions are filled in memory by
-project.propose and recorded, resolved, in the manifest; `propose --write` saves them for editing.
+project.propose and recorded, resolved, in the manifest; on a project of layers, `propose --write` saves them for
+editing.
 """
 from __future__ import annotations
 

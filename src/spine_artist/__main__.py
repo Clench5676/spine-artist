@@ -1,10 +1,12 @@
 """Command line for drivers: propose the default controls, then build and read the instruments.
 
-  python -m spine_artist propose <project> [--write]
+  python -m spine_artist propose <project of layers> [--write]
   python -m spine_artist build <project> [--out DIR] [--no-render] [--idle-frames N]
   python -m spine_artist target <project> <character or core> [--game DIR | --search] [--region global|japan]
   python -m spine_artist mod <build dir> [--bundles <the core's game bundles...>] --out DIR
   python -m spine_artist license [--confirm]
+
+A step that stops prints {"errors": [...]} and exits 1 (`target` with several matches: 2).
 """
 from __future__ import annotations
 
@@ -14,7 +16,13 @@ import sys
 from pathlib import Path
 
 from . import project as proj, runtime
+from .atlas import PackError
 from .build import BuildError, build
+from .derive import DeriveError
+from .instruments import InstrumentError
+
+# what stops a step with a message for the driver; anything else is a bug and keeps its traceback
+STOPS = (proj.ProjectError, DeriveError, PackError, InstrumentError, runtime.RuntimeUnavailable, FileNotFoundError)
 
 
 def main(argv=None) -> int:
@@ -67,12 +75,16 @@ def main(argv=None) -> int:
         try:
             bundles = a.bundles or target_bundles(a.build)
             print(json.dumps(pack_mod(a.build, bundles, a.out), indent=1))
-        except (ModError, TargetError) as e:
+        except (ModError, TargetError, FileNotFoundError) as e:
             print(json.dumps({'errors': [str(e)]}, indent=1))
             return 1
         return 0
     if a.cmd == 'propose':
-        data = proj.propose(a.project, proj.load(a.project))
+        try:
+            data = proj.propose(a.project, proj.load(a.project))
+        except STOPS as e:
+            print(json.dumps({'errors': [str(e)]}, indent=1, ensure_ascii=False))
+            return 1
         errors = proj.validate(a.project, data)
         if a.write:
             proj.save(a.project, data)
@@ -84,10 +96,10 @@ def main(argv=None) -> int:
     except BuildError as e:
         print(json.dumps({'errors': e.errors}, indent=1, ensure_ascii=False))
         return 1
-    except runtime.RuntimeUnavailable as e:
+    except STOPS as e:
         print(json.dumps({'errors': [str(e)]}, indent=1, ensure_ascii=False))
         return 1
-    summary = {'warnings': report['warnings'], 'pack': report['pack']}
+    summary ={'warnings': report['warnings'], 'pack': report['pack']}
     if 'instruments' in report:
         summary['round_trip'] = report['instruments']['round_trip']
     print(json.dumps(summary, indent=1, ensure_ascii=False))

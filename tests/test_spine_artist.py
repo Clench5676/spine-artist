@@ -756,3 +756,35 @@ def test_matte_edge_loses_the_background_rim():
     assert rim(rgb, soft) > .3 and rim(colour, alpha) < .05
     inside = r < 22                                                       # where the mask is sure
     assert np.allclose(colour[inside], rgb[inside]) and np.allclose(alpha[inside], 1)
+
+
+def stopped(capsys, *argv):
+    """The errors of a command line step that must stop."""
+    from spine_artist.__main__ import main
+    assert main(list(argv)) == 1
+    return ' '.join(json.loads(capsys.readouterr().out)['errors'])
+
+
+def test_a_stopped_step_reports_its_reason_as_json(tmp_path, capsys):
+    empty = tmp_path / 'empty'
+    empty.mkdir()
+    assert 'project.json' in stopped(capsys, 'build', str(empty))
+    assert 'manifest.json' in stopped(capsys, 'mod', str(empty), '--out', str(tmp_path / 'mod'))
+    broken = tmp_path / 'broken'
+    broken.mkdir()
+    (broken / 'project.json').write_text('{')
+    assert 'project.json' in stopped(capsys, 'build', str(broken))
+    folder = make_images(tmp_path / 'img')
+    shutil.rmtree(folder / 'expressions')
+    assert 'expressions/NN.png' in stopped(capsys, 'build', str(folder))
+    layers = make_project(tmp_path / 'layers')
+    data = proj.load(layers)
+    data['pack'] = {'page_width': 16, 'page_height': 16, 'allow_shrink': False}
+    proj.save(layers, data)
+    assert 'do not fit' in stopped(capsys, 'build', str(layers), '--no-render')
+
+
+def test_propose_on_images_says_where_the_decisions_are(tmp_path, capsys):
+    folder = make_images(tmp_path / 'img')
+    assert 'build/manifest.json' in stopped(capsys, 'propose', str(folder))
+    assert not (folder / 'project.json').exists()
