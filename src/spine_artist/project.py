@@ -113,11 +113,18 @@ def propose(folder: Path, data: dict) -> dict:
     x1 = max(b[2] for b in drawn); y1 = max(b[3] for b in drawn)
     frame = out.setdefault('frame', {})
     target = out.get('target')
-    if target and 'origin' not in frame:
-        # put the new face where the target's official face is (dialogue framing, emoticon positions)
+    if target:
         from .reference import load_reference, propose_frame
         ref = load_reference(resolve(folder, target['reference']), target['core'])
-        frame.update(propose_frame(out, {k: b for k, b in boxes.items() if b}, ref, target.get('fit', 'face')))
+        if 'origin' not in frame:
+            # put the new face where the target's official face is (dialogue framing, emoticon positions)
+            frame.update(propose_frame(out, {k: b for k, b in boxes.items() if b}, ref, target.get('fit', 'face')))
+        # a mod replaces the target's pages: keep their size and count
+        pages = ref.poses['base']['pages']
+        page_setting = out.setdefault('pack', {})
+        page_setting.setdefault('page_width', pages[0]['width'])
+        page_setting.setdefault('page_height', pages[0]['height'])
+        page_setting.setdefault('max_pages', len(pages))
     frame.setdefault('origin', [round((x0 + x1) / 2, 2), float(y1)])     # feet centre, like a standing figure
     frame.setdefault('scale', 1.)
     body_ids = [l['id'] for l in layers if l.get('role') == 'body'] or [layers[0]['id']]

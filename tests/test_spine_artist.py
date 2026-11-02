@@ -788,3 +788,23 @@ def test_propose_on_images_says_where_the_decisions_are(tmp_path, capsys):
     folder = make_images(tmp_path / 'img')
     assert 'build/manifest.json' in stopped(capsys, 'propose', str(folder))
     assert not (folder / 'project.json').exists()
+
+
+@needs_node
+def test_a_target_gives_its_page_size_and_count(tmp_path):
+    official = tmp_path / 'official'
+    make_project(official / 'src')
+    data = proj.load(official / 'src')
+    data['pack'] = {'page_width': 1024, 'page_height': 512}
+    proj.save(official / 'src', data)
+    build(official / 'src', render=False)
+    folder = make_images(tmp_path / 'img')
+    target = {'core': 'test_spr', 'reference': str(official / 'src' / 'build'), 'fit': 'face', 'halo': 'none'}
+    proj.save(folder, {'format': proj.FORMAT, 'name': 'test_spr', 'target': target})
+    report = build(folder, render=False)
+    manifest = json.loads((folder / 'build' / 'manifest.json').read_text())
+    assert manifest['controls']['pack'] == {'page_width': 1024, 'page_height': 512, 'max_pages': 1}
+    assert Image.open(folder / 'build' / 'test_spr.png').size == (1024, 512) and report['pack']['pages'] == 1
+    proj.save(folder, {'format': proj.FORMAT, 'name': 'test_spr', 'target': target, 'pack': {'page_width': 2048}})
+    build(folder, render=False)
+    assert Image.open(folder / 'build' / 'test_spr.png').size == (2048, 512)      # a decision stays the driver's
